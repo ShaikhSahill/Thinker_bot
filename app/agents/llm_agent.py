@@ -52,7 +52,11 @@ Output JSON schema:
 }}
 """.strip()
 
-        data = client.generate_json(prompt)
+        try:
+            data = client.generate_json(prompt)
+        except Exception:
+            # Gemini call failed (missing/invalid key, network, permission, etc).
+            return {"intent": None, "tool": None, "entities": {}}
         tool = data.get("tool")
         if tool is None:
             return {"intent": None, "tool": None, "entities": {}}
