@@ -4,6 +4,7 @@ from app.tools.org_tools import get_department_members, get_domain_members, get_
 from app.tools.project_tools import (
     find_project,
     get_project_members,
+    get_project_members_by_domain,
     get_project_progress,
     get_project_tasks,
     get_project_tasks_by_status,
@@ -40,6 +41,23 @@ def build_default_registry() -> ToolRegistry:
             },
         ),
         get_project_members,
+    )
+
+    registry.register(
+        ToolSpec(
+            name="get_project_members_by_domain",
+            description="List members assigned to a project filtered by user domain (frontend/backend/ui/ux/qa).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string"},
+                    "domain": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                },
+                "required": ["project", "domain"],
+            },
+        ),
+        get_project_members_by_domain,
     )
 
     registry.register(

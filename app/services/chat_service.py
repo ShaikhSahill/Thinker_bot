@@ -126,7 +126,7 @@ class ChatService:
                     sources.append(SourceRef(type="project", id=str(project_code or name), title=str(name), link=link))
             return sources
 
-        if intent == "project_members" and isinstance(data, dict):
+        if intent in ("project_members", "project_domain_members") and isinstance(data, dict):
             for m in (data.get("members") or [])[:25]:
                 user_id = m.get("userId")
                 user = m.get("user") or {}
@@ -186,12 +186,17 @@ class ChatService:
                 },
             )
 
-        if intent == "project_members" and isinstance(data, dict):
+        if intent in ("project_members", "project_domain_members") and isinstance(data, dict):
             members = data.get("members") or []
-            columns = ["User ID", "Role"]
+            columns = ["User ID", "Name", "Role"]
             rows = []
             for m in members[:100]:
-                rows.append([str(m.get("userId") or ""), str(m.get("role") or "")])
+                user = m.get("user") or {}
+                rows.append([
+                    str(m.get("userId") or ""),
+                    str(user.get("name") or user.get("displayName") or ""),
+                    str(m.get("role") or ""),
+                ])
             return ResponseCard(
                 card_type="TABLE",
                 answers={
@@ -237,6 +242,19 @@ class ChatService:
             tool = selection.get("tool")
             entities = selection.get("entities") or {}
 
+        # Robustness: if the user clearly asked for a domain within a project,
+        # force the domain-filtered tool even if selection picked generic project members.
+        inferred_domain = self._infer_domain_from_message(message)
+        if (
+            tool == "get_project_members"
+            and inferred_domain
+            and isinstance(entities, dict)
+            and entities.get("project")
+        ):
+            entities["domain"] = inferred_domain
+            intent = "project_domain_members"
+            tool = "get_project_members_by_domain"
+
         if tool is None:
             return {
                 "reply": self._unsupported_message(),
@@ -280,10 +298,27 @@ class ChatService:
         reply = self._formatter.format(user_message=message, intent=intent, entities=entities, tool=tool, data=data)
         return {"reply": reply, "intent": intent, "tool": tool, "entities": entities, "data": data}
 
+    def _infer_domain_from_message(self, message: str) -> Optional[str]:
+        lowered = (message or "").lower()
+        if "front" in lowered:
+            return "frontend"
+        if "back" in lowered:
+            return "backend"
+        if "ui" in lowered and "ux" in lowered:
+            return "uiux"
+        if "ui" in lowered:
+            return "ui"
+        if "ux" in lowered:
+            return "ux"
+        if "qa" in lowered or "tester" in lowered or "quality" in lowered:
+            return "qa"
+        return None
+
     def _intent_to_tool(self, intent: str):
         mapping = {
             "project_progress": "get_project_progress",
             "project_members": "get_project_members",
+            "project_domain_members": "get_project_members_by_domain",
             "project_tasks": "get_project_tasks",
             "project_tasks_status": "get_project_tasks_by_status",
             "department_members": "get_department_members",

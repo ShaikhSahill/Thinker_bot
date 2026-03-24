@@ -29,7 +29,7 @@ class MsgFormatterAgent:
         )
 
         # Deterministic for intents where accuracy matters and LLM often drops fields.
-        if intent in ("project_lookup", "project_members", "total_members"):
+        if intent in ("project_lookup", "project_members", "project_domain_members", "total_members"):
             return self._format_deterministic(user_message=user_message, intent=intent, entities=entities, tool=tool, data=data)
 
         # If the user explicitly asks for a count or a list, keep it deterministic.
@@ -69,16 +69,20 @@ class MsgFormatterAgent:
                 f"Progress: {data.get('progressPercent')}% ({data.get('tasks', {}).get('done')}/{data.get('tasks', {}).get('total')} tasks done)"
             )
 
-        if intent == "project_members" and isinstance(data, dict):
+        if intent in ("project_members", "project_domain_members") and isinstance(data, dict):
             project_name = data.get("project")
+            domain = data.get("domain") if intent == "project_domain_members" else None
             count = data.get("count")
             members = data.get("members") or []
             if wants_count and not wants_list:
                 if count == 0:
-                    return f"Project: {project_name}\nMembers: 0 (no members assigned yet)"
-                return f"Project: {project_name}\nMembers: {count}"
+                    suffix = f" (domain: {domain})" if domain else ""
+                    return f"Project: {project_name}{suffix}\nMembers: 0 (no members assigned yet)"
+                suffix = f" (domain: {domain})" if domain else ""
+                return f"Project: {project_name}{suffix}\nMembers: {count}"
             # Default: show list (trimmed)
-            lines = [f"Project: {project_name}", f"Members: {count}"]
+            header = f"Project: {project_name}" + (f" (domain: {domain})" if domain else "")
+            lines = [header, f"Members: {count}"]
             if count == 0:
                 lines.append("No members are assigned to this project yet.")
             if isinstance(members, list) and members:
@@ -86,10 +90,12 @@ class MsgFormatterAgent:
                 for m in members[:25]:
                     user_id = m.get("userId")
                     role = m.get("role")
+                    user = m.get("user") or {}
+                    name = user.get("name") or user.get("displayName")
                     if user_id and role:
-                        preview.append(f"{user_id} ({role})")
+                        preview.append(f"{user_id}{' - ' + str(name) if name else ''} ({role})")
                     elif user_id:
-                        preview.append(str(user_id))
+                        preview.append(f"{user_id}{' - ' + str(name) if name else ''}")
                 if preview:
                     lines.append("- " + ", ".join(preview))
                 if len(members) > 25:

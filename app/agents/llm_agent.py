@@ -39,7 +39,7 @@ Rules:
 - If the user asks for something not supported by these tools, output JSON with tool=null and intent=null.
 - Extract entities needed for the chosen tool.
 - Use keys: intent, tool, entities.
-- intent should be one of: list_projects, list_ongoing_projects, project_lookup, project_progress, project_members, project_tasks, project_tasks_status, department_members, domain_members, total_members.
+- intent should be one of: list_projects, list_ongoing_projects, project_lookup, project_progress, project_members, project_domain_members, project_tasks, project_tasks_status, department_members, domain_members, total_members.
 
 User message:
 {message}

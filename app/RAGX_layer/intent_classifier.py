@@ -25,11 +25,15 @@ class IntentClassifier:
 
         lowered = text.lower()
 
+        # Treat these as synonyms for "members" in project/org queries.
+        mentions_people = any(k in lowered for k in ["member", "members", "developer", "developers", "engineer", "engineers", "dev", "devs"])
+
         # list projects
-        if ("list" in lowered or "show" in lowered) and ("projects" in lowered or "project" in lowered):
+        # Guard: if the user is asking about people (members/developers), do NOT treat it as a project list request.
+        if (not mentions_people) and ("list" in lowered or "show" in lowered) and ("projects" in lowered):
             if "ongoing" in lowered or "in progress" in lowered or "in-progress" in lowered or "active" in lowered:
                 return IntentMatch(intent="list_ongoing_projects", entities={})
-            if "all" in lowered:
+            if "all" in lowered or lowered.strip() in ("projects", "list projects", "show projects"):
                 return IntentMatch(intent="list_projects", entities={})
 
         # project lookup (existence / id)
@@ -53,15 +57,23 @@ class IntentClassifier:
             entities = self._extract_project_entities(text)
             return IntentMatch(intent="project_progress", entities=entities)
 
-        # project members
-        if ("member" in lowered or "members" in lowered) and ("project" in lowered or "working on" in lowered):
+        # project members (optionally filtered by domain)
+        if mentions_people and ("project" in lowered or "working on" in lowered):
+            domain = self._extract_domain(lowered)
             entities = self._extract_project_entities(text)
+
             # If the user omitted the word 'project', try extracting after 'working on'.
             if not entities.get("project") and "working on" in lowered:
                 entities["project"] = self._extract_after_phrase(text, "working on") or ""
                 entities["project"] = entities["project"].strip(" ?.!\"'")
                 if not entities["project"]:
                     entities.pop("project", None)
+
+            # Example: "How many members are in the frontend department of project X"
+            if domain and entities.get("project"):
+                entities["domain"] = domain
+                return IntentMatch(intent="project_domain_members", entities=entities)
+
             return IntentMatch(intent="project_members", entities=entities)
 
         # project tasks (optionally status)
@@ -74,13 +86,13 @@ class IntentClassifier:
             return IntentMatch(intent="project_tasks", entities=entities)
 
         # department members
-        if ("member" in lowered or "members" in lowered) and "department" in lowered:
+        if mentions_people and "department" in lowered:
             dept = self._extract_after_keyword(text, "department")
             if dept:
                 return IntentMatch(intent="department_members", entities={"department": dept})
 
         # domain members
-        if ("who" in lowered or "members" in lowered) and ("frontend" in lowered or "backend" in lowered or "ui" in lowered or "ux" in lowered or "qa" in lowered or "tester" in lowered):
+        if ("who" in lowered or mentions_people) and ("frontend" in lowered or "backend" in lowered or "ui" in lowered or "ux" in lowered or "qa" in lowered or "tester" in lowered):
             domain = self._extract_domain(lowered)
             if domain:
                 return IntentMatch(intent="domain_members", entities={"domain": domain})

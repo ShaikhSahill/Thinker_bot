@@ -178,6 +178,106 @@ async def get_project_members(project: str, tenant_id: Optional[str] = None):
     }
 
 
+async def get_project_members_by_domain(project: str, domain: str, tenant_id: Optional[str] = None):
+    """List members assigned to a project filtered by user domain (frontend/backend/ui/ux/qa).
+
+    Requires a `users` collection with `userId` + `domain` fields for filtering.
+    """
+
+    db = get_db()
+    proj = await _find_project(db, project, tenant_id)
+    if not proj and tenant_id:
+        proj_global = await _find_project(db, project, None)
+        if proj_global:
+            actual_tenant = proj_global.get("tenantId")
+            return {
+                "error": (
+                    f"Project '{proj_global.get('name')}' exists, but it belongs to tenantId '{actual_tenant}'. "
+                    f"Your request used tenantId '{tenant_id}'. "
+                    "Use the correct tenantId (or omit tenantId to search globally)."
+                )
+            }
+    if not proj:
+        return {"error": f"Project '{project}' not found"}
+
+    collections = await db.list_collection_names()
+
+    project_id_str = str(proj["_id"])
+    match = {"projectId": {"$in": [project_id_str, proj["_id"]]}}
+
+    member_collection_name = None
+    for candidate in ("project_member", "projects_member", "project_members", "projects_members"):
+        if candidate in collections:
+            member_collection_name = candidate
+            break
+    if member_collection_name is None:
+        return {
+            "error": "No project members collection found. Expected one of: project_member, projects_member, project_members, projects_members."
+        }
+
+    cursor = db[member_collection_name].find(match, {"_id": 0}).sort("userId", 1)
+    members = [doc async for doc in cursor]
+    if not members:
+        return {
+            "project": proj.get("name"),
+            "projectCode": proj.get("projectCode"),
+            "domain": domain,
+            "count": 0,
+            "members": [],
+        }
+
+    domain_norm = (domain or "").strip().lower()
+    role_token_map = {
+        "frontend": ["FRONTEND"],
+        "backend": ["BACKEND"],
+        "ui": ["UI"],
+        "ux": ["UX"],
+        "uiux": ["UI", "UX"],
+        "qa": ["QA", "TEST"],
+    }
+
+    def _role_matches(m: dict) -> bool:
+        role = (m.get("role") or "").upper()
+        tokens = role_token_map.get(domain_norm)
+        if not tokens:
+            return False
+        return any(t in role for t in tokens)
+
+    # Prefer filtering by users.domain when available; otherwise fall back to member.role.
+    users_by_id: dict[str, dict] = {}
+    if "users" in collections:
+        user_ids = [m.get("userId") for m in members if m.get("userId")]
+        if user_ids:
+            users_cursor = db.users.find({"userId": {"$in": user_ids}}, {"_id": 0})
+            users_by_id = {u["userId"]: u async for u in users_cursor if u.get("userId")}
+
+    filtered: list[dict] = []
+    for m in members:
+        uid = m.get("userId")
+        user = users_by_id.get(uid) if uid else None
+        if user is not None:
+            user_domain = (user.get("domain") or "").strip().lower()
+            if user_domain and user_domain == domain_norm:
+                filtered.append({**m, "user": user})
+                continue
+            # If user exists but has no domain, fall back to role matching.
+            if not user_domain and _role_matches(m):
+                filtered.append({**m, "user": user})
+                continue
+        else:
+            # No user enrichment available; fall back to role matching.
+            if _role_matches(m):
+                filtered.append(m)
+
+    return {
+        "project": proj.get("name"),
+        "projectCode": proj.get("projectCode"),
+        "domain": domain,
+        "count": len(filtered),
+        "members": filtered,
+    }
+
+
 async def list_projects(tenant_id: Optional[str] = None):
     db = get_db()
     query = {}
